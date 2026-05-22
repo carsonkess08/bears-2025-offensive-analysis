@@ -1,0 +1,468 @@
+---
+title: "Chicago Bears 2025 Offensive Analysis"
+author: "Carson Kessler"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme:
+      bootswatch: cosmo
+      primary: "#0B162A"
+    toc: true
+    toc_float:
+      collapsed: false
+    toc_depth: 2
+    number_sections: true
+    code_folding: hide
+    df_print: paged
+    fig_width: 9
+    fig_height: 5
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"
+)
+```
+
+```{css, echo=FALSE}
+h1, h2, h3 {
+  color: #0B162A;
+  font-weight: 600;
+}
+body {
+  font-size: 16px;
+  line-height: 1.6;
+}
+.title {
+  border-bottom: 4px solid #C83803;
+  padding-bottom: 10px;
+}
+.summary-box {
+  background-color: #f4f6f8;
+  border-left: 5px solid #C83803;
+  padding: 16px 20px;
+  margin: 20px 0;
+  border-radius: 4px;
+}
+```
+
+## Introduction
+This report analyzes the Chicago Bears offense during the 2025 NFL season using
+play-by-play data from the nflreadr package. I look at EPA, success rate, and
+situational performance to understand how the offense performed.
+
+<div class="summary-box">
+**Bottom line:** The 2025 Bears fielded a top-7 offense by EPA per play, built on
+balanced, efficient early downs and strong third-down conversion. Their one clear
+weakness was red zone finishing, where they ranked 24th of 32, which is the most
+actionable area for improvement.
+</div>
+
+```{r load-packages}
+library(nflreadr)
+library(tidyverse)
+library(plotly)
+```
+
+```{r theme-setup, include=FALSE}
+theme_set(theme_minimal(base_size = 13))
+theme_update(
+  plot.title = element_text(face = "bold", color = "#0B162A"),
+  plot.subtitle = element_text(color = "grey40")
+)
+```
+
+```{r load-data}
+pbp <- load_pbp(2025)
+```
+
+```{r clean-data}
+offense <- pbp %>%
+  filter(play_type %in% c("pass", "run"), !is.na(epa))
+```
+dim(offense)
+
+## League-Wide Context: Where Did the Bears Rank?
+
+Before zooming into the Bears specifically, it helps to see where they ranked
+among all 32 teams in offensive EPA per play. This is one of the cleanest single
+measures of overall offensive quality.
+
+```{r team-epa-ranking}
+team_epa <- offense %>%
+  group_by(posteam) %>%
+  summarize(
+    plays = n(),
+    epa_per_play = mean(epa),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(epa_per_play)) %>%
+  mutate(rank = row_number())
+
+# Where did the Bears land?
+team_epa %>% filter(posteam == "CHI")
+```
+
+The Bears finished 7th in the league in offensive EPA per play, placing them
+firmly in the upper third of NFL offenses. The chart below shows the full league
+ranking with Chicago highlighted.
+
+```{r team-epa-plot}
+p1 <- team_epa %>%
+  ggplot(aes(x = reorder(posteam, epa_per_play), y = epa_per_play, fill = posteam == "CHI")) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("FALSE" = "grey70", "TRUE" = "#0B162A")) +
+  labs(
+    title = "2025 Offensive EPA per Play by Team",
+    subtitle = "Chicago highlighted in navy",
+    x = NULL,
+    y = "EPA per Play"
+  ) + 
+  theme_minimal() +
+  theme(legend.position = "none")
+ggplotly(p1, tooltip = "text")
+```
+
+## Pass vs Run Efficiency
+
+A core question for any offense is how efficient they are throwing versus running.
+Modern analytics generally finds passing more efficient than running, but the size
+of that gap varies by team. Here's how the Bears split out.
+
+```{r pass-run-split}
+bears_split <- offense %>%
+  filter(posteam == "CHI") %>%
+  group_by(play_type) %>%
+  summarize(
+    plays = n(),
+    epa_per_play = mean(epa),
+    success_rate = mean(success, na.rm = TRUE),
+    avg_yards = mean(yards_gained, na.rm = TRUE),
+    .groups = "drop"
+  )
+bears_split
+```
+
+
+The averages tell part of the story, but the distribution of outcomes reveals
+more. The boxplot below shows the full spread of EPA for pass and run plays.
+
+```{r pass-run plot}
+p2 <- offense %>%
+  filter(posteam == "CHI") %>%
+  ggplot(aes(x = play_type, y = epa, fill = play_type)) + 
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_manual(values= c("pass" = "#0B162A", "run" = "#C83803")) +
+  labs(
+    title = "Bears EPA Distribution: Pass vs Run",
+    x = "Play Type",
+    y = "EPA"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+ggplotly(p2)
+```
+
+
+The boxplot makes the tradeoff clear. Passing produced a much wider range of
+outcomes, with explosive gains above +4 EPA but also costly negative plays below
+-4. The run game clustered tightly around zero, offering consistency at the cost
+of explosive upside. This explains why passing carried a higher average EPA
+despite a lower success rate.
+
+## Performance by Down
+
+How an offense performs across downs reveals a lot about its identity. Strong
+offenses stay efficient on early downs, which keeps them out of difficult
+third-and-long situations and lets them stay unpredictable in their play calling.
+
+```{r down-analysis}
+bears_downs <- offense %>%
+  filter(posteam == "CHI", down %in% 1:4) %>%
+  group_by(down) %>%
+  summarize(
+    plays = n(),
+    epa_per_play = mean(epa),
+    success_rate = mean(success, na.rm = TRUE),
+    .groups = "drop"
+    )
+bears_downs
+```
+The Bears were highly efficient on first down (+0.135 EPA per play), which is the foundation of a good offense and a key reason they ranked 7th overall. Second down was their flattest down, hovering right at zero, suggesting they didn't consistently build on early-down success. They recovered on third down (+0.086 EPA, 46.6% success rate), showing an ability to convert and sustain drives. Fourth down was negative, but with only 41 plays the sample is too small to draw firm conclusions.
+
+```{r down-plot}
+p3 <- bears_downs %>%
+  ggplot(aes(x = factor(down), y = epa_per_play, fill = epa_per_play > 0,
+             text = paste0("Down: ", down,
+                           "<br>EPA/play: ", round(epa_per_play, 3),
+                           "<br>Plays: ", plays,
+                           "<br>Success rate: ", round(success_rate * 100, 1), "%"))) +
+  geom_col() +
+  scale_fill_manual(values = c("FALSE" = "#C83803", "TRUE" = "#0B162A")) +
+  labs(title = "Bears EPA per Play by Down",
+       x = "Down", y = "EPA per Play") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplotly(p3, tooltip = "text")
+```
+
+
+## Play Calling Tendencies
+
+This section looks at how pass-heavy or run-heavy the Bears were across downs,
+which reveals their offensive philosophy and how predictable they may have been to
+opposing defenses.
+
+```{r tendencies}
+bears_tendency <- offense %>%
+  filter(posteam == "CHI", down %in% 1:3) %>%
+  group_by(down) %>%
+  summarize(
+    pass_rate = mean(play_type == "pass") * 100,
+    .groups = "drop"
+  )
+bears_tendency
+```
+
+The Bears were remarkably balanced on early downs, splitting exactly 50/50 between
+pass and run on first down and staying near even on second down. This balance made
+them difficult to predict early in the down sequence. As expected, they shifted
+pass-heavy on third down (65.4%), when distance-to-go typically demands it. The
+early-down balance, combined with their strong first-down efficiency, suggests an
+offense that stayed ahead of schedule and kept defenses honest rather than tipping
+its hand.
+
+```{r tendency-plot}
+p4 <- bears_tendency %>%
+  ggplot(aes(x = factor(down), y = pass_rate,
+             text = paste0("Down: ", down,
+                           "<br>Pass rate: ", round(pass_rate, 1), "%"))) +
+  geom_col(fill = "#0B162A") +
+  geom_text(aes(label = paste0(round(pass_rate, 1), "%")),
+            nudge_y = 4, color = "black") +
+  labs(title = "Bears Pass Rate by Down",
+       x = "Down", y = "Pass Rate (%)") +
+  ylim(0, 100) +
+  theme_minimal()
+
+ggplotly(p4, tooltip = "text")
+```
+
+
+## Situational Analysis: Third Down and Red Zone
+
+Third down conversion and red zone efficiency are two of the most important
+situational metrics in football. They directly translate to sustaining drives and finishing them with points, and they often separate good offenses from great ones.
+
+```{r third_down}
+third_down <- offense %>%
+  filter(down == 3, !is.na(success)) %>%
+  group_by(posteam) %>%
+  summarize(conversion_rate = mean(success) * 100, .groups = "drop")
+
+bears_third <- third_down %>% filter(posteam == "CHI") %>%
+  pull(conversion_rate)
+league_third <- mean(third_down$conversion_rate)
+
+cat("Bears 3rd down success rate:", round(bears_third, 1), "%/n")
+cat("League average:", round(league_third, 1), "%/n")
+```
+The Bears converted on third down at a 46.6% clip, comfortably above the leagu average of 42.3%. Third down is where drives are extended or killed, so finishing above average here reflects an offense that sustained possessions well. This lines up with their third-down EPA recovery seen earlier.
+
+```{r red-zone}
+red_zone <- offense %>%
+  filter(yardline_100 <= 20) %>%
+  group_by(posteam) %>%
+  summarize(
+    rz_plays = n(),
+    tds = sum(touchdown == 1, na.rm = TRUE),
+    td_rate = tds / rz_plays * 100,
+    .groups = "drop"
+  )
+bears_rz <- red_zone %>% filter(posteam == "CHI")
+bears_rz
+```
+
+
+```{r red-zone-context}
+red_zone <- red_zone %>%
+  arrange(desc(td_rate)) %>%
+  mutate(rank = row_number())
+
+league_rz <- mean(red_zone$td_rate)
+
+red_zone %>% filter(posteam == "CHI")
+cat("League average red zone TD rate (per play):", round(league_rz, 1), "%/n")
+```
+Red zone finishing was the clear weak spot. The Bears ranked 24th of 32 in red
+zone touchdown rate per play (17.3%), below the league average of 19.1%. This
+stands out against their otherwise strong profile: a top-7 offense that moved the
+ball efficiently between the 20s but struggled to finish drives with touchdowns,
+likely settling for field goals where better red zone offenses found the end zone. This is the most actionable takeaway in the analysis and points to a concrete area for improvement.
+  
+## EPA Over the Course of the Season
+
+Tracking EPA per play by week shows whether the offense improved, declined, or
+stayed steady as the season progressed. This can reveal the impact of coaching
+adjustments, player development, injuries, or strength of schedule.
+
+```{r weekly-trend}
+weekly_epa <- offense %>%
+  filter(posteam == "CHI") %>%
+  group_by(week) %>%
+  summarize(epa_per_play = mean(epa), .groups = "drop")
+
+p5 <- weekly_epa %>%
+  ggplot(aes(x = week, y = epa_per_play,
+             text = paste0("Week: ", week,
+                           "<br>EPA/play: ", round(epa_per_play, 3)))) +
+  geom_line(color = "#0B162A", linewidth = 1, group = 1) +
+  geom_point(color = "#C83803", size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(title = "Bears Weekly Offensive EPA per Play",
+       x = "Week", y = "EPA per Play") +
+  theme_minimal()
+
+ggplotly(p5, tooltip = "text")
+```
+
+The weekly trend reveals a volatile offense. The Bears swung between elite
+performances (peaking around +0.45 EPA per play in Week 9, with other big games in
+Weeks 3 and 17) and quieter weeks that dipped below league-neutral. Most weeks
+landed above the zero line, consistent with their strong full-season ranking, but
+the large week-to-week swings show an offense that was more boom-or-bust on a game
+level than steadily dominant. This echoes the boom-or-bust tendency seen in their
+passing distribution.
+
+
+```{r offensive-points}
+bears_points <- pbp %>%
+  filter(posteam == "CHI") %>%
+  group_by(week) %>%
+  summarize(
+    off_tds = sum(touchdown == 1 & td_team == "CHI", na.rm = TRUE),
+    field_goals = sum(field_goal_result == "made", na.rm = TRUE),
+    extra_points = sum(extra_point_result == "good", na.rm = TRUE),
+    two_pt = sum(two_point_conv_result == "success", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    offensive_points = off_tds * 6 + field_goals * 3 + extra_points * 1 + two_pt * 2)
+bears_points %>% select(week, off_tds, field_goals, offensive_points)
+```
+
+```{r offensive-points-plot}
+p6 <- bears_points %>%
+  ggplot(aes(x = week, y = offensive_points, 
+             text = paste0("Week: ", week,
+                           "<br>Offensive points: ", offensive_points,
+                           "<br>Offensive TDs: ", off_tds,
+                           "<br>Field Goals: ", field_goals))) +
+  geom_col(fill = "#0B162A") +
+  geom_hline(yintercept = mean(bears_points$offensive_points),
+             linetype = "dashed", color = "#C83803") +
+  labs(
+    title = "Bears Offensive Points Scored by Week",
+    subtitle = "Dashed line marks season average (offensive points only)",
+    x = "Week",
+    y = "Offensive Points"
+  ) +
+  theme_minimal()
+ggplotly(p6, tooltip = "text")
+```
+## Offensive Scoring Output
+
+Efficiency metrics like EPA capture how well an offense moves the ball, but points
+are what ultimately decide games. This section isolates offensive points only,
+excluding any scores from defense or special teams, to measure how the unit's
+efficiency translated into actual production.
+
+```{r quarter-analysis}
+bears_quarters <- offense %>%
+  filter(posteam == "CHI", qtr %in% 1:4) %>%
+  group_by(qtr) %>%
+  summarize(
+    plays = n(),
+    epa_per_play = mean(epa, na.rm = TRUE),
+    success_rate = mean(success, na.rm = TRUE),
+    pass_rate = mean(play_type == "pass") * 100,
+    .groups = "drop"
+  )
+bears_quarters
+```
+
+```{r quarter-plot}
+p7 <- bears_quarters %>%
+  ggplot(aes(x = factor(qtr), y = epa_per_play, fill = epa_per_play > 0,
+                        text = paste0("Quarter: ", qtr,
+                                      "<br>EPA/play: ", round(epa_per_play, 3),
+                                      "<br>Plays: ", plays,
+                                      "<br>Success rate: ", round(success_rate * 100, 1), "%",
+                                      "<br>Pass rate: ", round(pass_rate, 1), "%"))) +
+           geom_col() +
+           scale_fill_manual(values = c("FALSE" = "#C83803", "TRUE" = "#0B162A")) +
+           labs(title = "Bears EPA per Play by Quarter",
+                x= "Quarter", y = "EPA per Play") +
+           theme_minimal() +
+           theme(legend.position = "none")
+         ggplotly(p7, tooltip = "text")
+```
+
+The quarter splits reveal a story the season averages completely hide: the Bears
+were a second-half team. They were neutral in the first quarter (+0.019 EPA) and
+actually negative in the second (-0.013), their only negative quarter, before
+surging after halftime to +0.101 in the third and a season-best +0.168 in the
+fourth. The jump from the second to third quarter suggests effective halftime
+adjustments, and the strong fourth quarter, paired with a higher pass rate (58.8%),
+points to an offense that was dangerous late in games. Some of the fourth-quarter
+production likely reflects favorable game script when trailing, but the strong
+third quarter, when game state is typically more neutral, suggests this was a
+genuine pattern rather than a garbage-time artifact. The clear takeaway for the
+coaching staff: if the Bears could start games the way they finished them, this
+offense has another level. The slow starts were arguably their biggest missed
+opportunity.
+
+## Methodology
+
+Data comes from the nflverse `nflreadr` package, covering all 2025 regular season
+plays. The analysis is limited to run and pass plays with valid EPA values,
+excluding special teams and plays with missing data. EPA (Expected Points Added)
+measures how much each play changed the team's expected points given the game
+situation, and success rate captures the share of plays that gained enough yardage
+to be considered successful for the down and distance.
+
+## Key Takeaways
+
+The 2025 Chicago Bears offense was strong but uneven. The headline findings:
+
+- **Top-tier overall efficiency.** The Bears ranked 7th of 32 in offensive EPA per
+  play (+0.074), placing them firmly in the upper third of the league.
+
+- **Balanced and unpredictable early downs.** A perfect 50/50 run-pass split on
+  first down, paired with strong first-down EPA (+0.135), kept defenses honest and
+  the offense ahead of schedule.
+
+- **Passing drove the upside.** Passing carried higher EPA than running despite a
+  lower success rate, reflecting a boom-or-bust passing attack that produced
+  explosive plays but also negative ones.
+
+- **Above-average on third down.** A 46.6% third-down success rate, well above the
+  42.3% league average, showed an ability to sustain drives.
+
+- **Red zone finishing was the weak spot.** Ranking 24th of 32 in red zone
+  touchdown rate, the Bears struggled to convert scoring chances into touchdowns,
+  the clearest area for improvement.
+
+- **Volatile week to week.** The offense alternated between elite and quiet
+  performances rather than producing steady output.
+
+**Overall:** This was a quality offense, top-7 by the numbers, whose ceiling was
+limited by red zone finishing and game-to-game inconsistency. The most actionable
+takeaway for the coaching staff would be improving red zone efficiency, where even
+league-average finishing would have meaningfully increased scoring output.
